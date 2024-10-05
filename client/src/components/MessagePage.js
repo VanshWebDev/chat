@@ -16,7 +16,7 @@ import moment from 'moment'
 import notificationAudio from "../assets/notificationaudio.m4a"
 import CheckIcon from '@mui/icons-material/Check';
 import DoneAllIcon from '@mui/icons-material/DoneAll';
-
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 const MessagePage = () => {
   const params = useParams()
   const socketConnection = useSelector(state => state?.user?.socketConnection)
@@ -96,25 +96,81 @@ const MessagePage = () => {
     })
   }
 
-  useEffect(()=>{
-      if(socketConnection){
-        socketConnection.emit('message-page',params.userId)
-
-        socketConnection.emit('seen',params.userId)
-
-        socketConnection.on('message-user',(data)=>{
-          setDataUser(data)
-        }) 
-        
-        socketConnection.on('message',(data)=>{
-          // console.log('message data',data)
-          console.log(data)
-          setAllMessage(data)
-        })
-
-
+  useEffect(() => {
+    if (socketConnection) {
+      // Existing socket listeners
+      socketConnection.emit('message-page', params.userId);
+      socketConnection.emit('seen', params.userId);
+    
+      socketConnection.on('message-user', (data) => {
+        setDataUser(data);
+      });
+  
+      // When a new message or messages are received, append them to `allMessage`
+      socketConnection.on('message', (data) => {
+        if (Array.isArray(data)) {
+          setAllMessage((prevMessages) => [...prevMessages, ...data]);
+        } else {
+          setAllMessage((prevMessages) => [...prevMessages, data]);
+        }
+      });
+  
+      // Listen for single tick (message sent)
+      socketConnection.on('message-sent', (message) => {
+        setAllMessage((prevMessages) =>
+          prevMessages.map((msg) =>
+            msg._id === message._id ? { ...msg, status: 'sent' } : msg
+          )
+        );
+      });
+    
+      // Listen for double ticks (message delivered)
+      socketConnection.on('message-delivered', (message) => {
+        setAllMessage((prevMessages) =>
+          prevMessages.map((msg) =>
+            msg._id === message._id ? { ...msg, status: 'delivered' } : msg
+          )
+        );
+      });
+    
+      // Listen for blue ticks (message read)
+      socketConnection.on('message-read', (messages) => {
+        setAllMessage((prevMessages) =>
+          prevMessages.map((msg) => {
+            const updatedMsg = messages.find((m) => m._id === msg._id);
+            return updatedMsg ? { ...msg, status: 'read' } : msg;
+          })
+        );
+      });
+    }
+  
+    // Cleanup event listeners when component unmounts
+    return () => {
+      if (socketConnection) {
+        socketConnection.off('message-user');
+        socketConnection.off('message');
+        socketConnection.off('message-sent');
+        socketConnection.off('message-delivered');
+        socketConnection.off('message-read');
       }
-  },[socketConnection,params?.userId,user])
+    };
+  }, [socketConnection, params?.userId, user]);
+  
+  
+  
+
+const renderMessageStatus = (status) => {
+    switch (status) {
+        case 'sent':
+            return <CheckIcon fontSize='small' />;
+        case 'delivered':
+            return <DoneAllIcon fontSize='small' />;
+        case 'read':
+            return <CheckCircleIcon style={{ color: 'blue' }} fontSize='small' />;
+        default:
+            return null;
+    }
+};
 
   const handleOnChange = (e)=>{
     const { name, value} = e.target
@@ -192,37 +248,34 @@ const MessagePage = () => {
                 
                   {/**all message show here */}
                   <div className='flex flex-col gap-2 py-2 mx-2' ref={currentMessage}>
-                    {
-                      allMessage.map((msg,index)=>{
-                        console.log(msg)
-                        return(
-                          <div className={` p-1 py-1 rounded w-fit max-w-[280px] md:max-w-sm lg:max-w-md ${user._id === msg?.msgByUserId ? "ml-auto bg-teal-100" : "bg-white"}`}>
-                            <div className='w-full relative'>
-                              {
-                                msg?.imageUrl && (
-                                  <img 
-                                    src={msg?.imageUrl}
-                                    className='w-full h-full object-scale-down'
-                                  />
-                                )
-                              }
-                              {
-                                msg?.videoUrl && (
-                                  <video
-                                    src={msg.videoUrl}
-                                    className='w-full h-full object-scale-down'
-                                    controls
-                                  />
-                                )
-                              }
-                            </div>
-                            <p className='px-2'>{msg.text}</p>
-                            <p className='px-2'>{msg.seen ? <DoneAllIcon fontSize='small'/>: <CheckIcon fontSize='small'/>}</p>
-                            <p className='text-xs ml-auto w-fit'>{moment(msg.createdAt).format('hh:mm')}</p>
-                          </div>
-                        )
-                      })
-                    }
+                  {
+  allMessage && allMessage.length > 0 && allMessage.map((msg, index) => {
+    return (
+      <div key={msg._id} className={`p-1 py-1 rounded w-fit max-w-[280px] md:max-w-sm lg:max-w-md ${user._id === msg?.msgByUserId ? "ml-auto bg-teal-100" : "bg-white"}`}>
+        <div className='w-full relative'>
+          {msg?.imageUrl && (
+            <img
+              src={msg?.imageUrl}
+              className='w-full h-full object-scale-down'
+              alt="user uploaded"
+            />
+          )}
+          {msg?.videoUrl && (
+            <video
+              src={msg.videoUrl}
+              className='w-full h-full object-scale-down'
+              controls
+            />
+          )}
+        </div>
+        <p className='px-2'>{msg.text}</p>
+        <p className='px-2'>{renderMessageStatus(msg.status)}</p>
+        <p className='text-xs ml-auto w-fit'>{moment(msg.createdAt).format('hh:mm')}</p>
+      </div>
+    );
+  })
+}
+
                   </div>
 
 

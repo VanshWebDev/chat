@@ -65,56 +65,71 @@ io.on('connection',async(socket)=>{
 
 
     //new message
-    socket.on('new message',async(data)=>{
-
-        //check conversation is available both user
-
+    socket.on('new message', async (data) => {
+        // Check if the conversation exists between the two users
         let conversation = await ConversationModel.findOne({
-            "$or" : [
-                { sender : data?.sender, receiver : data?.receiver },
-                { sender : data?.receiver, receiver :  data?.sender}
-            ]
-        })
-
-        //if conversation is not available
-        if(!conversation){
-            const createConversation = await ConversationModel({
-                sender : data?.sender,
-                receiver : data?.receiver
-            })
-            conversation = await createConversation.save()
+          "$or": [
+            { sender: data?.sender, receiver: data?.receiver },
+            { sender: data?.receiver, receiver: data?.sender }
+          ]
+        });
+      
+        // If the conversation doesn't exist, create a new one
+        if (!conversation) {
+          const createConversation = new ConversationModel({
+            sender: data?.sender,
+            receiver: data?.receiver,
+          });
+          conversation = await createConversation.save();
         }
-        
+      
+        // Create and save the new message
         const message = new MessageModel({
-          text : data.text,
-          imageUrl : data.imageUrl,
-          videoUrl : data.videoUrl,
-          msgByUserId :  data?.msgByUserId,
-        })
-        const saveMessage = await message.save()
-
-        const updateConversation = await ConversationModel.updateOne({ _id : conversation?._id },{
-            "$push" : { messages : saveMessage?._id }
-        })
-
-        const getConversationMessage = await ConversationModel.findOne({
-            "$or" : [
-                { sender : data?.sender, receiver : data?.receiver },
-                { sender : data?.receiver, receiver :  data?.sender}
+          text: data.text,
+          imageUrl: data.imageUrl,
+          videoUrl: data.videoUrl,
+          msgByUserId: data?.msgByUserId,
+          seen: false, // Initially not seen
+          delivered: false // Initially not delivered
+        });
+        const savedMessage = await message.save();
+      
+        // Add the message to the conversation
+        await ConversationModel.updateOne({ _id: conversation?._id }, {
+          "$push": { messages: savedMessage._id }
+        });
+      
+        // Send message to the sender
+        io.to(data?.sender).emit('message', savedMessage);
+      
+        // Send message to the receiver
+        io.to(data?.receiver).emit('message', savedMessage);
+      });
+      
+    
+    socket.on('seen', async (msgByUserId) => {
+        let conversation = await ConversationModel.findOne({
+            "$or": [
+                { sender: user?._id, receiver: msgByUserId },
+                { sender: msgByUserId, receiver: user?._id }
             ]
-        }).populate('messages').sort({ updatedAt : -1 })
-
-
-        io.to(data?.sender).emit('message',getConversationMessage?.messages || [])
-        io.to(data?.receiver).emit('message',getConversationMessage?.messages || [])
-
-        //send conversation
-        const conversationSender = await getConversation(data?.sender)
-        const conversationReceiver = await getConversation(data?.receiver)
-
-        io.to(data?.sender).emit('conversation',conversationSender)
-        io.to(data?.receiver).emit('conversation',conversationReceiver)
-    })
+        });
+    
+        const conversationMessageId = conversation?.messages || [];
+    
+        // Update seen status for all messages from the other user
+        const updateMessages = await MessageModel.updateMany(
+            { _id: { "$in": conversationMessageId }, msgByUserId: msgByUserId },
+            { "$set": { seen: true } }
+        );
+    
+        // Send conversation updates with blue ticks
+        const updatedMessages = await MessageModel.find({ _id: { "$in": conversationMessageId } });
+        io.to(user?._id?.toString()).emit('message-read', updatedMessages);
+        io.to(msgByUserId).emit('message-read', updatedMessages);
+    });
+    
+    
 
 
     //sidebar
